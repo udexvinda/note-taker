@@ -91,6 +91,7 @@ def generate_report(payload: dict) -> str:
     return resp.output_text
 
 def markdown_to_docx(md_text: str) -> bytes:
+    """Minimal Markdown -> DOCX for a clean client-ready export."""
     doc = Document()
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
@@ -120,57 +121,52 @@ def markdown_to_docx(md_text: str) -> bytes:
     return buf.getvalue()
 
 # =========================================================
-# Session init
+# Session state init
 # =========================================================
-st.set_page_config(page_title="Discovery Intelligence Report Generator", layout="wide")
-
 st.session_state.setdefault("report_md", "")
 st.session_state.setdefault("docx_bytes", None)
 st.session_state.setdefault("last_error", "")
 
 # =========================================================
-# Payload builder (reads current session_state)
+# Generation callback (THIS FIXES THE DOUBLE-CLICK)
 # =========================================================
-def build_payload_from_state():
-    include_open_questions = st.session_state.get("include_open_questions", True)
-    payload = {
-        "client_name": clean_text(st.session_state.get("client_name", "")) or "Client",
-        "meeting_type": st.session_state.get("meeting_type", "Discovery / Intake"),
-        "project_name": clean_text(st.session_state.get("project_name", "")),
-        "transcript_or_notes": clean_text(st.session_state.get("transcript", "")),
-        "structured_inputs": {
-            "project_objective": clean_text(st.session_state.get("objective", "")),
-            "why_initiated_problem_trigger": clean_text(st.session_state.get("why_now", "")),
-            "benefiting_departments": clean_text(st.session_state.get("beneficiaries", "")),
-            "impacted_people": clean_text(st.session_state.get("impacted_people", "")),
-            "kpi_burden": clean_text(st.session_state.get("kpis", "")),
-            "if_not_done_consequences": clean_text(st.session_state.get("constraints_if_not_done", "")),
-            "internal_challenges": clean_text(st.session_state.get("internal_challenges", "")),
-            "org_changes": clean_text(st.session_state.get("org_changes", "")),
-            "ceo_info": clean_text(st.session_state.get("ceo_info", "")),
-            "previous_ceo_problems": clean_text(st.session_state.get("prior_ceo_issues", "")),
-            "why_external_vendor": clean_text(st.session_state.get("vendor_reason", "")),
-            "why_not_listening_internally": clean_text(st.session_state.get("listening_issue", "")),
-            "ownership_and_misalignment": clean_text(st.session_state.get("ownership_misalignment", "")),
-            "contracts_dependencies": clean_text(st.session_state.get("contracts", "")),
-            "ma_and_culture": clean_text(st.session_state.get("ma_history", "")),
-            "budget_duration_payment": clean_text(st.session_state.get("budget_duration_payment", "")),
-            "long_term_vision_and_next": clean_text(st.session_state.get("long_term", "")),
-        },
-        "report_constraints": {
-            "no_solutions": True,
-            "include_open_questions": include_open_questions,
-        }
-    }
-    return payload
-
-# =========================================================
-# Generation (called from Output tab)
-# =========================================================
-def run_generation_from_output():
+def run_generation():
     try:
-        payload = build_payload_from_state()
+        # Read values from session_state (because we use keys on widgets)
+        include_open_questions = st.session_state.get("include_open_questions", True)
+        include_docx = st.session_state.get("include_docx", True)
 
+        payload = {
+            "client_name": clean_text(st.session_state.get("client_name", "")) or "Client",
+            "meeting_type": st.session_state.get("meeting_type", "Discovery / Intake"),
+            "project_name": clean_text(st.session_state.get("project_name", "")),
+            "transcript_or_notes": clean_text(st.session_state.get("transcript", "")),
+            "structured_inputs": {
+                "project_objective": clean_text(st.session_state.get("objective", "")),
+                "why_initiated_problem_trigger": clean_text(st.session_state.get("why_now", "")),
+                "benefiting_departments": clean_text(st.session_state.get("beneficiaries", "")),
+                "impacted_people": clean_text(st.session_state.get("impacted_people", "")),
+                "kpi_burden": clean_text(st.session_state.get("kpis", "")),
+                "if_not_done_consequences": clean_text(st.session_state.get("constraints_if_not_done", "")),
+                "internal_challenges": clean_text(st.session_state.get("internal_challenges", "")),
+                "org_changes": clean_text(st.session_state.get("org_changes", "")),
+                "ceo_info": clean_text(st.session_state.get("ceo_info", "")),
+                "previous_ceo_problems": clean_text(st.session_state.get("prior_ceo_issues", "")),
+                "why_external_vendor": clean_text(st.session_state.get("vendor_reason", "")),
+                "why_not_listening_internally": clean_text(st.session_state.get("listening_issue", "")),
+                "ownership_and_misalignment": clean_text(st.session_state.get("ownership_misalignment", "")),
+                "contracts_dependencies": clean_text(st.session_state.get("contracts", "")),
+                "ma_and_culture": clean_text(st.session_state.get("ma_history", "")),
+                "budget_duration_payment": clean_text(st.session_state.get("budget_duration_payment", "")),
+                "long_term_vision_and_next": clean_text(st.session_state.get("long_term", "")),
+            },
+            "report_constraints": {
+                "no_solutions": True,
+                "include_open_questions": include_open_questions,
+            }
+        }
+
+        # Validate
         if not payload["transcript_or_notes"] and all(not v for v in payload["structured_inputs"].values()):
             st.session_state["last_error"] = "Please paste at least a transcript/notes OR fill at least one structured field."
             st.session_state["report_md"] = ""
@@ -179,10 +175,11 @@ def run_generation_from_output():
 
         st.session_state["last_error"] = ""
 
+        # Generate
         report_md = generate_report(payload)
         st.session_state["report_md"] = report_md
 
-        if st.session_state.get("include_docx", True):
+        if include_docx:
             st.session_state["docx_bytes"] = markdown_to_docx(report_md)
         else:
             st.session_state["docx_bytes"] = None
@@ -192,21 +189,23 @@ def run_generation_from_output():
         st.session_state["report_md"] = ""
         st.session_state["docx_bytes"] = None
 
-def clear_report():
-    st.session_state["report_md"] = ""
-    st.session_state["docx_bytes"] = None
-    st.session_state["last_error"] = ""
-
 # =========================================================
 # UI
 # =========================================================
+st.set_page_config(page_title="Discovery Intelligence Report Generator", layout="wide")
+
 st.title("Discovery Intelligence Report Generator (Streamlit)")
 st.caption("Turn messy discovery notes into a premium executive-ready report (no solutions).")
 
 with st.sidebar:
     st.header("Settings")
     st.write(f"Model: `{get_model()}`")
-    st.slider("Tone (Neutral ↔ Strong)", 0, 10, 3, key="tone")
+    st.slider(
+        "Tone (Neutral ↔ Strong)",
+        0, 10, 3,
+        help="Lower is more neutral; higher is more assertive. (Currently used indirectly via temperature.)",
+        key="tone",
+    )
     st.divider()
     st.subheader("Quality checks")
     st.checkbox("Include 'Open Questions & Data Needed' section", value=True, key="include_open_questions")
@@ -215,7 +214,7 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["Input", "Output"])
 
 # -----------------------------
-# Input tab (only collects inputs)
+# Input tab
 # -----------------------------
 with tab1:
     st.subheader("Client & meeting info")
@@ -272,28 +271,30 @@ with tab1:
 
     st.text_area("Long-term company vision / what happens after project", height=90, key="long_term")
 
-    st.info("Go to the Output tab and click **Generate/Refresh** to create the report.")
+    st.divider()
+
+    # Button with callback = single click, always works
+    st.button(
+        "Generate Discovery Intelligence Report",
+        type="primary",
+        on_click=run_generation,
+    )
+
+    if st.session_state.get("last_error"):
+        st.error(st.session_state["last_error"])
 
 # -----------------------------
-# Output tab (Generate/Refresh lives here)
+# Output tab
 # -----------------------------
 with tab2:
     st.subheader("Generated report")
-
-    colX, colY, colZ = st.columns([1.2, 1.0, 2.8])
-    with colX:
-        st.button("Generate / Refresh report", type="primary", on_click=run_generation_from_output)
-    with colY:
-        st.button("Clear report", on_click=clear_report)
-    with colZ:
-        st.caption("Tip: update inputs in the Input tab, then click **Generate/Refresh** here.")
 
     if st.session_state.get("last_error"):
         st.error(st.session_state["last_error"])
 
     report_md = st.session_state.get("report_md", "")
     if not report_md:
-        st.info("No report yet. Click **Generate / Refresh report** above.")
+        st.info("Generate a report from the Input tab.")
     else:
         st.markdown(report_md)
 
