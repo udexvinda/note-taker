@@ -22,7 +22,6 @@ def clean_text(x: str) -> str:
     return (x or "").strip()
 
 def build_inputs(payload: dict) -> str:
-    # A compact representation for the LLM
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 DISCOVERY_SYSTEM = """You are a senior management consultant.
@@ -79,10 +78,8 @@ def generate_report(payload: dict) -> str:
     client = get_client()
     model = get_model()
     inputs_json = build_inputs(payload)
-
     user_prompt = DISCOVERY_USER_TEMPLATE.format(inputs_json=inputs_json)
 
-    # Using Responses API via OpenAI python SDK (simple)
     resp = client.responses.create(
         model=model,
         input=[
@@ -94,21 +91,15 @@ def generate_report(payload: dict) -> str:
     return resp.output_text
 
 def markdown_to_docx(md_text: str) -> bytes:
-    """
-    Simple Markdown -> DOCX:
-    - Converts headings starting with #, ##, ###
-    - Bullets starting with - or *
-    This is intentionally minimal but looks professional.
-    """
+    """Minimal Markdown -> DOCX for a clean client-ready export."""
     doc = Document()
 
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
     style.font.size = Pt(11)
 
-    lines = md_text.splitlines()
-    for line in lines:
-        line = line.rstrip()
+    for raw in md_text.splitlines():
+        line = raw.rstrip()
 
         if not line.strip():
             doc.add_paragraph("")
@@ -135,13 +126,21 @@ def markdown_to_docx(md_text: str) -> bytes:
 # -----------------------------
 st.set_page_config(page_title="Discovery Intelligence Report Generator", layout="wide")
 
+# Initialize session keys (prevents edge cases)
+st.session_state.setdefault("report_md", None)
+st.session_state.setdefault("docx_bytes", None)
+
 st.title("Discovery Intelligence Report Generator (Streamlit)")
 st.caption("Turn messy discovery notes into a premium executive-ready report (no solutions).")
 
 with st.sidebar:
     st.header("Settings")
     st.write(f"Model: `{get_model()}`")
-    st.slider("Tone (Neutral ↔ Strong)", 0, 10, 3, help="Lower is more neutral; higher is more assertive. (Currently used indirectly via temperature.)")
+    st.slider(
+        "Tone (Neutral ↔ Strong)",
+        0, 10, 3,
+        help="Lower is more neutral; higher is more assertive. (Currently used indirectly via temperature.)"
+    )
     st.divider()
     st.subheader("Quality checks")
     include_open_questions = st.checkbox("Include 'Open Questions & Data Needed' section", value=True)
@@ -149,13 +148,20 @@ with st.sidebar:
 
 tab1, tab2 = st.tabs(["Input", "Output"])
 
+# -----------------------------
+# Input tab
+# -----------------------------
 with tab1:
     st.subheader("Client & meeting info")
     colA, colB, colC = st.columns(3)
     with colA:
         client_name = st.text_input("Client name (optional)", value="")
     with colB:
-        meeting_type = st.selectbox("Meeting type", ["Discovery / Intake", "Stakeholder interview", "Project kick-off (discovery)", "Other"], index=0)
+        meeting_type = st.selectbox(
+            "Meeting type",
+            ["Discovery / Intake", "Stakeholder interview", "Project kick-off (discovery)", "Other"],
+            index=0,
+        )
     with colC:
         project_name = st.text_input("Project name (optional)", value="")
 
@@ -202,9 +208,71 @@ with tab1:
 
     generate = st.button("Generate Discovery Intelligence Report", type="primary")
 
+    # -----------------------------
+    # Action (IMPORTANT FIX)
+    # Run generation HERE (inside tab1) and then st.rerun()
+    # -----------------------------
+    if generate:
+        payload = {
+            "client_name": clean_text(client_name) or "Client",
+            "meeting_type": meeting_type,
+            "project_name": clean_text(project_name),
+            "transcript_or_notes": clean_text(transcript),
+            "structured_inputs": {
+                "project_objective": clean_text(objective),
+                "why_initiated_problem_trigger": clean_text(why_now),
+                "benefiting_departments": clean_text(beneficiaries),
+                "impacted_people": clean_text(impacted_people),
+                "kpi_burden": clean_text(kpis),
+                "if_not_done_consequences": clean_text(constraints_if_not_done),
+                "internal_challenges": clean_text(internal_challenges),
+                "org_changes": clean_text(org_changes),
+                "ceo_info": clean_text(ceo_info),
+                "previous_ceo_problems": clean_text(prior_ceo_issues),
+                "why_external_vendor": clean_text(vendor_reason),
+                "why_not_listening_internally": clean_text(listening_issue),
+                "ownership_and_misalignment": clean_text(ownership_misalignment),
+                "contracts_dependencies": clean_text(contracts),
+                "ma_and_culture": clean_text(ma_history),
+                "budget_duration_payment": clean_text(budget_duration_payment),
+                "long_term_vision_and_next": clean_text(long_term),
+            },
+            "report_constraints": {
+                "no_solutions": True,
+                "include_open_questions": include_open_questions,
+            },
+        }
+
+        if not payload["transcript_or_notes"] and all(not v for v in payload["structured_inputs"].values()):
+            st.error("Please paste at least a transcript/notes OR fill at least one structured field.")
+            st.stop()
+
+        with st.spinner("Generating executive-ready report..."):
+            try:
+                report_md = generate_report(payload)
+                st.session_state["report_md"] = report_md
+
+                if include_docx:
+                    st.session_state["docx_bytes"] = markdown_to_docx(report_md)
+                else:
+                    st.session_state["docx_bytes"] = None
+
+                # Force a fresh run so Output tab immediately sees session_state
+                st.session_state["active_tab"] = "Output"
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Generation failed: {e}")
+                st.stop()
+
+# -----------------------------
+# Output tab
+# -----------------------------
 with tab2:
     st.subheader("Generated report")
-    if "report_md" not in st.session_state:
+
+    # Optional hint to user + reliable display
+    if not st.session_state.get("report_md"):
         st.info("Generate a report from the Input tab.")
     else:
         st.markdown(st.session_state["report_md"])
@@ -225,55 +293,3 @@ with tab2:
                     file_name="discovery_intelligence_report.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
-
-# -----------------------------
-# Action
-# -----------------------------
-if generate:
-    payload = {
-        "client_name": clean_text(client_name) or "Client",
-        "meeting_type": meeting_type,
-        "project_name": clean_text(project_name),
-        "transcript_or_notes": clean_text(transcript),
-        "structured_inputs": {
-            "project_objective": clean_text(objective),
-            "why_initiated_problem_trigger": clean_text(why_now),
-            "benefiting_departments": clean_text(beneficiaries),
-            "impacted_people": clean_text(impacted_people),
-            "kpi_burden": clean_text(kpis),
-            "if_not_done_consequences": clean_text(constraints_if_not_done),
-            "internal_challenges": clean_text(internal_challenges),
-            "org_changes": clean_text(org_changes),
-            "ceo_info": clean_text(ceo_info),
-            "previous_ceo_problems": clean_text(prior_ceo_issues),
-            "why_external_vendor": clean_text(vendor_reason),
-            "why_not_listening_internally": clean_text(listening_issue),
-            "ownership_and_misalignment": clean_text(ownership_misalignment),
-            "contracts_dependencies": clean_text(contracts),
-            "ma_and_culture": clean_text(ma_history),
-            "budget_duration_payment": clean_text(budget_duration_payment),
-            "long_term_vision_and_next": clean_text(long_term),
-        },
-        "report_constraints": {
-            "no_solutions": True,
-            "include_open_questions": include_open_questions,
-        }
-    }
-
-    if not payload["transcript_or_notes"] and all(not v for v in payload["structured_inputs"].values()):
-        st.error("Please paste at least a transcript/notes OR fill at least one structured field.")
-        st.stop()
-
-    with st.spinner("Generating executive-ready report..."):
-        try:
-            report_md = generate_report(payload)
-            st.session_state["report_md"] = report_md
-
-            if include_docx:
-                st.session_state["docx_bytes"] = markdown_to_docx(report_md)
-            else:
-                st.session_state["docx_bytes"] = None
-
-            st.success("Done. Open the Output tab.")
-        except Exception as e:
-            st.error(f"Generation failed: {e}")
